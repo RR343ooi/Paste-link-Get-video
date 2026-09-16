@@ -71,6 +71,10 @@ def _has_valid_cookies():
     except Exception:
         return False
 
+def _is_format_error(msg):
+    m = (msg or "").lower()
+    return "requested format is not available" in m or "format is not available" in m
+
 def _friendly_bot_error():
     has_file = os.path.exists(COOKIE_FILE)
     has_valid = _has_valid_cookies()
@@ -179,32 +183,54 @@ def _download_task(task_id, url, quality, mode):
                     _active_downloads[task_id]["progress"] = 100
 
         tmpl = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
-        base = _base_opts()
-        base.update({"outtmpl": tmpl, "progress_hooks": [hook]})
+        base_common = _base_opts()
+        base_common.update({"outtmpl": tmpl, "progress_hooks": [hook]})
+        info = None
+        filename = ""
+        last_err = None
         if mode == "audio":
-            base.update({
+            base_common.update({
                 "format": "bestaudio/best",
                 "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
             })
-            ydl_opts = _inject_cookies(base)
+            ydl_opts = _inject_cookies(dict(base_common))
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    filename = ydl.prepare_filename(info)
+            except Exception as e:
+                if _is_bot_challenge(str(e)):
+                    raise RuntimeError(_friendly_bot_error()) from e
+                raise
         else:
-            if quality and quality != "best" and str(quality).isdigit():
-                fmt = f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best"
+            q = str(quality or "best").strip().lower().replace("p", "")
+            if q != "best" and q.isdigit():
+                fmts = [
+                    f"bestvideo[height<={q}]+bestaudio/best[height<={q}]/best",
+                    "bestvideo+bestaudio/best",
+                    "best",
+                ]
             else:
-                fmt = "bestvideo+bestaudio/best"
-            base.update({"format": fmt, "merge_output_format": "mp4"})
-            ydl_opts = _inject_cookies(base)
-
-        info = None
-        filename = ""
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info)
-        except Exception as e:
-            if _is_bot_challenge(str(e)):
-                raise RuntimeError(_friendly_bot_error()) from e
-            raise
+                fmts = ["bestvideo+bestaudio/best", "best"]
+            for fmt in fmts:
+                try:
+                    cur = dict(base_common)
+                    cur.update({"format": fmt, "merge_output_format": "mp4"})
+                    ydl_opts = _inject_cookies(cur)
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        filename = ydl.prepare_filename(info)
+                    last_err = None
+                    break
+                except Exception as e:
+                    if _is_bot_challenge(str(e)):
+                        raise RuntimeError(_friendly_bot_error()) from e
+                    if _is_format_error(str(e)) and fmt != fmts[-1]:
+                        last_err = e
+                        continue
+                    raise
+            if last_err is not None and info is None:
+                raise last_err
         try:
             info_title = info.get("title", "") if isinstance(info, dict) else ""
         except Exception:
