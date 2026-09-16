@@ -100,35 +100,34 @@ def _download_task(task_id, url, quality, mode):
 
         tmpl = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
         if mode == "audio":
-            ydl_opts = _inject_cookies({
-                "format": "bestaudio/best",
-                "outtmpl": tmpl,
-                "quiet": True,
-                "no_warnings": True,
-                "noplaylist": True,
-                "extractor_args": {
-    "youtube": {
-        "player_client": ["android", "ios"]
-    }
-
-                "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
-                "progress_hooks": [hook],
-            })
+         ydl_opts = _inject_cookies({
+            "format": "bestaudio/best",
+            "outtmpl": tmpl,
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "ios"]
+                }
+            },
+            "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
+            "progress_hooks": [hook],
+        })
         else:
             if quality and quality != "best" and str(quality).isdigit():
                 fmt = f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best"
             else:
-                fmt = "bestvideo+bestaudio/best"
-            ydl_opts = _inject_cookies({
+              ydl_opts = _inject_cookies({
                 "format": fmt,
                 "outtmpl": tmpl,
                 "quiet": True,
                 "no_warnings": True,
                 "extractor_args": {
-    "youtube": {
-        "player_client": ["android", "ios"]
-    }
-}
+                    "youtube": {
+                        "player_client": ["android", "ios"]
+                    }
+                },
                 "noplaylist": True,
                 "merge_output_format": "mp4",
                 "progress_hooks": [hook],
