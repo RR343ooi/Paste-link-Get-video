@@ -42,6 +42,12 @@ def _extract_info(url):
         "no_warnings": True,
         "noplaylist": True,
         "skip_download": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "ios", "web"]
+            }
+        }
+    })
     })
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
