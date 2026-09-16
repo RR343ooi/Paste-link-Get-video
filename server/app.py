@@ -12,18 +12,101 @@ DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 COOKIE_FILE = os.path.join(BASE_DIR, "cookies.txt")
-if os.getenv("YOUTUBE_COOKIES") and not os.path.exists(COOKIE_FILE):
-    try:
-        with open(COOKIE_FILE, "w", encoding="utf-8") as _cf:
-            _cf.write(os.getenv("YOUTUBE_COOKIES"))
-    except Exception:
-        pass
 
+def _load_cookies_from_env():
+    for _key in ("YOUTUBE_COOKIES", "YTDLP_COOKIES", "COOKIES"):
+        _val = os.getenv(_key)
+        if not _val:
+            continue
+        _val = _val.strip()
+        if not _val:
+            continue
+        try:
+            if os.path.isfile(_val):
+                import shutil
+                if os.path.abspath(_val) != os.path.abspath(COOKIE_FILE):
+                    shutil.copyfile(_val, COOKIE_FILE)
+                return
+            looks_like_content = ("\n" in _val) or ("# Netscape" in _val) or ("# HTTP Cookie" in _val) or ("youtube.com" in _val)
+            content = _val
+            if not looks_like_content:
+                try:
+                    import base64
+                    decoded = base64.b64decode(_val, validate=True).decode("utf-8", errors="ignore")
+                    if "# Netscape" in decoded or "youtube.com" in decoded:
+                        content = decoded
+                        looks_like_content = True
+                except Exception:
+                    pass
+            if looks_like_content or len(content) > 200:
+                with open(COOKIE_FILE, "w", encoding="utf-8", newline="\n") as _cf:
+                    _cf.write(content)
+                return
+            with open(COOKIE_FILE, "w", encoding="utf-8", newline="\n") as _cf:
+                _cf.write(content)
+            return
+        except Exception:
+            pass
+
+_load_cookies_from_env()
+
+def _is_bot_challenge(msg):
+    m = (msg or "").lower()
+    return any(s in m for s in ["sign in to confirm you’re not a bot", "sign in to confirm you're not a bot", "confirm you're not a bot", "confirm you’re not a bot", "use --cookies"])
+
+def _has_valid_cookies():
+    if not os.path.exists(COOKIE_FILE):
+        return False
+    try:
+        if os.path.getsize(COOKIE_FILE) < 50:
+            return False
+        with open(COOKIE_FILE, "r", encoding="utf-8", errors="ignore") as _f:
+            _txt = _f.read()
+        _lines = [l for l in _txt.splitlines() if l.strip() and not l.strip().startswith("#")]
+        if not _lines:
+            return False
+        if "youtube.com" not in _txt and "google.com" not in _txt and "yt-dlp" not in _txt.lower():
+            return False
+        return True
+    except Exception:
+        return False
+
+def _friendly_bot_error():
+    has_file = os.path.exists(COOKIE_FILE)
+    has_valid = _has_valid_cookies()
+    if not has_file:
+        hint = "NO server/cookies.txt found and no YOUTUBE_COOKIES env var"
+    elif not has_valid:
+        hint = "server/cookies.txt exists but is PLACEHOLDER/invalid (only comments, no youtube.com cookies)"
+    else:
+        hint = "server/cookies.txt found but YouTube still blocks it (cookies expired or datacenter IP blocked)"
+    return (
+        "YouTube bot check failed (Sign in to confirm you’re not a bot). "
+        f"YouTube is blocking datacenter IPs — {hint}. "
+        "Fix: export REAL YouTube cookies (Netscape format) and provide them to the server: "
+        "1) Install 'Get cookies.txt LOCALLY' extension, open youtube.com logged-in, Export -> paste content into server/cookies.txt (replace placeholder), "
+        "OR 2) set env var YOUTUBE_COOKIES to the FULL file content (or base64) on your host (Render/Railway/etc), "
+        "then redeploy + ensure yt-dlp is latest: pip install -U yt-dlp. "
+        "See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
+    )
 
 def _inject_cookies(opts):
-    if os.path.exists(COOKIE_FILE):
+    _load_cookies_from_env()
+    if _has_valid_cookies():
         opts["cookiefile"] = COOKIE_FILE
     return opts
+
+def _base_opts():
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "geo_bypass": True,
+        "retries": 2,
+        "socket_timeout": 30,
+        "extractor_args": {"youtube": {"player_client": ["android", "ios", "web"], "player_skip": ["webpage"]}},
+        "http_headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"},
+    }
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 CORS(app)
@@ -37,48 +120,45 @@ def _safe_filename(name):
 
 
 def _extract_info(url):
-    ydl_opts = _inject_cookies({
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "skip_download": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios"]
-            }
-        }
-    })
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        if "entries" in info:
-            info = next(iter(info["entries"]), info)
-        formats = []
-        seen = set()
-        for f in info.get("formats") or []:
-            height = f.get("height")
-            ext = f.get("ext")
-            fid = f.get("format_id")
-            if height and ext in ("mp4", "webm", "mov") and height not in seen:
-                seen.add(height)
-                formats.append({
-                    "format_id": fid,
-                    "height": height,
-                    "ext": ext,
-                    "filesize": f.get("filesize") or f.get("filesize_approx"),
-                    "label": f"{height}p",
-                })
-        formats.sort(key=lambda x: x["height"], reverse=True)
-        if not formats:
-            formats = [{"format_id": "best", "height": 0, "ext": "mp4", "label": "Best"}]
-        return {
-            "url": url,
-            "title": info.get("title") or "Untitled",
-            "thumbnail": info.get("thumbnail"),
-            "duration": info.get("duration"),
-            "uploader": info.get("uploader"),
-            "extractor": info.get("extractor_key"),
-            "formats": formats,
-        }
+    base = _base_opts()
+    base.update({"skip_download": True})
+    ydl_opts = _inject_cookies(base)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as e:
+        if _is_bot_challenge(str(e)):
+            raise RuntimeError(_friendly_bot_error()) from e
+        raise
+    if "entries" in info:
+        info = next(iter(info["entries"]), info)
+    formats = []
+    seen = set()
+    for f in info.get("formats") or []:
+        height = f.get("height")
+        ext = f.get("ext")
+        fid = f.get("format_id")
+        if height and ext in ("mp4", "webm", "mov") and height not in seen:
+            seen.add(height)
+            formats.append({
+                "format_id": fid,
+                "height": height,
+                "ext": ext,
+                "filesize": f.get("filesize") or f.get("filesize_approx"),
+                "label": f"{height}p",
+            })
+    formats.sort(key=lambda x: x["height"], reverse=True)
+    if not formats:
+        formats = [{"format_id": "best", "height": 0, "ext": "mp4", "label": "Best"}]
+    return {
+        "url": url,
+        "title": info.get("title") or "Untitled",
+        "thumbnail": info.get("thumbnail"),
+        "duration": info.get("duration"),
+        "uploader": info.get("uploader"),
+        "extractor": info.get("extractor_key"),
+        "formats": formats,
+    }
 
 
 def _download_task(task_id, url, quality, mode):
@@ -99,58 +179,51 @@ def _download_task(task_id, url, quality, mode):
                     _active_downloads[task_id]["progress"] = 100
 
         tmpl = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
+        base = _base_opts()
+        base.update({"outtmpl": tmpl, "progress_hooks": [hook]})
         if mode == "audio":
-         ydl_opts = _inject_cookies({
-            "format": "bestaudio/best",
-            "outtmpl": tmpl,
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["android", "ios"]
-                }
-            },
-            "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
-            "progress_hooks": [hook],
-        })
+            base.update({
+                "format": "bestaudio/best",
+                "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
+            })
+            ydl_opts = _inject_cookies(base)
         else:
             if quality and quality != "best" and str(quality).isdigit():
                 fmt = f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best"
             else:
-              ydl_opts = _inject_cookies({
-                "format": fmt,
-                "outtmpl": tmpl,
-                "quiet": True,
-                "no_warnings": True,
-                "extractor_args": {
-                    "youtube": {
-                        "player_client": ["android", "ios"]
-                    }
-                },
-                "noplaylist": True,
-                "merge_output_format": "mp4",
-                "progress_hooks": [hook],
-            })
+                fmt = "bestvideo+bestaudio/best"
+            base.update({"format": fmt, "merge_output_format": "mp4"})
+            ydl_opts = _inject_cookies(base)
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            if mode == "audio":
-                base = os.path.splitext(filename)[0]
-                mp3 = base + ".mp3"
-                if os.path.exists(mp3):
-                    filename = mp3
-            else:
-                if not os.path.exists(filename):
-                    cand = globmod.glob(os.path.join(DOWNLOAD_DIR, _safe_filename(info.get("title", "")) + ".*"))
-                    if cand:
-                        filename = cand[0]
-            fname = os.path.basename(filename)
-            with _download_lock:
-                _active_downloads[task_id]["status"] = "completed"
-                _active_downloads[task_id]["filename"] = fname
-                _active_downloads[task_id]["progress"] = 100
+        info = None
+        filename = ""
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+        except Exception as e:
+            if _is_bot_challenge(str(e)):
+                raise RuntimeError(_friendly_bot_error()) from e
+            raise
+        try:
+            info_title = info.get("title", "") if isinstance(info, dict) else ""
+        except Exception:
+            info_title = ""
+        if mode == "audio":
+            base_p = os.path.splitext(filename)[0]
+            mp3 = base_p + ".mp3"
+            if os.path.exists(mp3):
+                filename = mp3
+        else:
+            if filename and not os.path.exists(filename):
+                cand = globmod.glob(os.path.join(DOWNLOAD_DIR, _safe_filename(info_title) + ".*"))
+                if cand:
+                    filename = cand[0]
+        fname = os.path.basename(filename) if filename else ""
+        with _download_lock:
+            _active_downloads[task_id]["status"] = "completed"
+            _active_downloads[task_id]["filename"] = fname
+            _active_downloads[task_id]["progress"] = 100
     except Exception as e:
         with _download_lock:
             _active_downloads[task_id]["status"] = "error"
