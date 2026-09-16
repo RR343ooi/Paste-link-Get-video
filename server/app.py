@@ -48,7 +48,6 @@ def _extract_info(url):
             }
         }
     })
-    })
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         if "entries" in info:
