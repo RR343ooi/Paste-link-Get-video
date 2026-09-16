@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+server/downloads/*
+!server/downloads/.gitkeep
+.next/
+node_modules/
+out/
+build/
+.DS_Store
+*.tsbuildinfo

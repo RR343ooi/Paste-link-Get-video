@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>FreeMediaDownloader — Paste link. Get video.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="icon" href="server\templates\icon.png" type="image/png">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+<main class="wrap">
+  <header class="hero">
+    <h1>Paste link.<br>Get video.</h1>
+    <p class="subtitle">Paste any YouTube, TikTok, Instagram, X or Facebook link.<br>Fetch info, pick quality, download MP4 or MP3 — fast &amp; free.</p>
+  </header>
+
+  <section class="card input-card" aria-label="Video URL input">
+    <div class="card-top">
+      <span class="card-label">VIDEO URLS — ONE PER LINE</span>
+      <span id="linkCount" class="count-pill">0 links detected</span>
+    </div>
+    <textarea id="urlInput" rows="5" spellcheck="false" autocomplete="off" placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ&#10;https://www.tiktok.com/@user/video/123456789&#10;https://www.instagram.com/p/ABC123/"></textarea>
+    <div class="action-bar">
+      <button id="pasteBtn" class="mini-btn" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v3"/></svg>
+        Paste
+      </button>
+      <button id="exampleBtn" class="mini-btn" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke-opacity=".18"/><path d="M12 8v8"/><path d="M8 12h8"/></svg>
+        Try examples
+      </button>
+      <button id="clearBtn" class="mini-btn" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+        Clear
+      </button>
+      <span id="status" class="status-inline" role="status" aria-live="polite"></span>
+    </div>
+    <button id="fetchBtn" class="btn primary fetch-btn" type="button">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      Fetch videos
+    </button>
+    <div class="hint">
+      <span class="kbd">Ctrl</span><span class="plus">+</span><span class="kbd">Enter</span><span class="hint-text">to fetch</span>
+      <span class="hint-dot">·</span>
+      <span class="hint-text">It supports dozens of sites</span>
+    </div>
+  </section>
+
+  <div class="platforms" aria-label="Supported platforms">
+    <span class="plat"><span class="dot yt"></span> YouTube</span>
+    <span class="plat"><span class="dot tk"></span> TikTok</span>
+    <span class="plat"><span class="dot ig"></span> Instagram</span>
+    <span class="plat"><span class="dot x"></span> X / Twitter</span>
+    <span class="plat"><span class="dot fb"></span> Facebook</span>
+    <span class="plat"><span class="dot sf"></span> SoundCloud</span>
+    <span class="plat"><span class="dot rd"></span> Reddit</span>
+    <span class="plat"><span class="dot vm"></span> Vimeo</span>
+  </div>
+
+  <section id="results" class="results" aria-live="polite"></section>
+
+  <section id="emptyState" class="card empty-card">
+    <div class="empty-icon" aria-hidden="true">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+    </div>
+    <p class="empty-title">Ready to fetch</p>
+    <p class="empty-sub">No videos yet — paste a link above to get started.</p>
+  </section>
+
+  <section id="bulkBar" class="card bulk hidden">
+    <div class="row bulk-row">
+      <label class="bulk-label">Quality for all <select id="bulkQuality"><option value="best">Best</option></select></label>
+      <div class="bulk-actions">
+        <button id="dlAllVideo" class="btn small">Download all — MP4</button>
+        <button id="dlAllAudio" class="btn ghost small">Download all — MP3</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card files">
+    <h3>Downloads</h3>
+    <div id="fileList" class="muted">No files yet.</div>
+  </section>
+
+  <footer class="muted small footer" style="text-align:center;color:#9ca3af">Paste link. Get video.</footer>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
