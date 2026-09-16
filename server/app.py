@@ -37,7 +37,7 @@ def _safe_filename(name):
 
 
 def _extract_info(url):
-ydl_opts = _inject_cookies({
+    ydl_opts = _inject_cookies({
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
