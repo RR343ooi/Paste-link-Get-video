@@ -37,14 +37,14 @@ def _safe_filename(name):
 
 
 def _extract_info(url):
-    ydl_opts = _inject_cookies({
+ydl_opts = _inject_cookies({
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
         "skip_download": True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "web"]
+                "player_client": ["android", "ios"]
             }
         }
     })
@@ -106,6 +106,11 @@ def _download_task(task_id, url, quality, mode):
                 "quiet": True,
                 "no_warnings": True,
                 "noplaylist": True,
+                "extractor_args": {
+    "youtube": {
+        "player_client": ["android", "ios"]
+    }
+}
                 "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
                 "progress_hooks": [hook],
             })
@@ -119,6 +124,11 @@ def _download_task(task_id, url, quality, mode):
                 "outtmpl": tmpl,
                 "quiet": True,
                 "no_warnings": True,
+                "extractor_args": {
+    "youtube": {
+        "player_client": ["android", "ios"]
+    }
+}
                 "noplaylist": True,
                 "merge_output_format": "mp4",
                 "progress_hooks": [hook],
