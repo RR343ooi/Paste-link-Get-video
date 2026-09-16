@@ -1,0 +1,4 @@
+# Netscape HTTP Cookie File
+# Paste your YouTube cookies here (exported from browser)
+# This file is used by yt-dlp via --cookies to bypass bot checks
+# For Render deployment, set YOUTUBE_COOKIES env var instead

@@ -11,6 +11,20 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+COOKIE_FILE = os.path.join(BASE_DIR, "cookies.txt")
+if os.getenv("YOUTUBE_COOKIES") and not os.path.exists(COOKIE_FILE):
+    try:
+        with open(COOKIE_FILE, "w", encoding="utf-8") as _cf:
+            _cf.write(os.getenv("YOUTUBE_COOKIES"))
+    except Exception:
+        pass
+
+
+def _inject_cookies(opts):
+    if os.path.exists(COOKIE_FILE):
+        opts["cookiefile"] = COOKIE_FILE
+    return opts
+
 app = Flask(__name__, template_folder="templates", static_folder="static")
 CORS(app)
 
@@ -23,12 +37,12 @@ def _safe_filename(name):
 
 
 def _extract_info(url):
-    ydl_opts = {
+    ydl_opts = _inject_cookies({
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
         "skip_download": True,
-    }
+    })
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         if "entries" in info:
@@ -81,7 +95,7 @@ def _download_task(task_id, url, quality, mode):
 
         tmpl = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
         if mode == "audio":
-            ydl_opts = {
+            ydl_opts = _inject_cookies({
                 "format": "bestaudio/best",
                 "outtmpl": tmpl,
                 "quiet": True,
@@ -89,13 +103,13 @@ def _download_task(task_id, url, quality, mode):
                 "noplaylist": True,
                 "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
                 "progress_hooks": [hook],
-            }
+            })
         else:
             if quality and quality != "best" and str(quality).isdigit():
                 fmt = f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best"
             else:
                 fmt = "bestvideo+bestaudio/best"
-            ydl_opts = {
+            ydl_opts = _inject_cookies({
                 "format": fmt,
                 "outtmpl": tmpl,
                 "quiet": True,
@@ -103,7 +117,7 @@ def _download_task(task_id, url, quality, mode):
                 "noplaylist": True,
                 "merge_output_format": "mp4",
                 "progress_hooks": [hook],
-            }
+            })
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
