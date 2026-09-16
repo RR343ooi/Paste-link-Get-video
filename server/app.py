@@ -110,7 +110,7 @@ def _download_task(task_id, url, quality, mode):
     "youtube": {
         "player_client": ["android", "ios"]
     }
-}
+
                 "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
                 "progress_hooks": [hook],
             })
