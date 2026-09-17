@@ -225,9 +225,22 @@ def _download_task(task_id, url, quality, mode):
                 except Exception as e:
                     if _is_bot_challenge(str(e)):
                         raise RuntimeError(_friendly_bot_error()) from e
-                    if _is_format_error(str(e)) and fmt != fmts[-1]:
+                    if _is_format_error(str(e)):
                         last_err = e
-                        continue
+                        if fmt != fmts[-1]:
+                            continue
+                        try:
+                            fallback_opts = {"outtmpl": tmpl, "quiet": True, "no_warnings": True, "noplaylist": True, "format": "best", "progress_hooks": [hook]}
+                            fallback_opts = _inject_cookies(fallback_opts)
+                            with yt_dlp.YoutubeDL(fallback_opts) as ydl2:
+                                info = ydl2.extract_info(url, download=True)
+                                filename = ydl2.prepare_filename(info)
+                            last_err = None
+                            break
+                        except Exception as e2:
+                            if _is_bot_challenge(str(e2)):
+                                raise RuntimeError(_friendly_bot_error()) from e2
+                            raise e2
                     raise
             if last_err is not None and info is None:
                 raise last_err
