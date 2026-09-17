@@ -1,9 +1,15 @@
-FROM python:3.12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+FROM python:3.10-slim
+
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    git \
+    && rm -rf /var/lib/apt-get/lists/*
+
 WORKDIR /app
-COPY requirements.txt .
+
+COPY server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
 COPY . .
-RUN mkdir -p downloads
-EXPOSE 5000
-CMD ["python", "app.py"]
+
+CMD ["python", "server/app.py"]
