@@ -102,14 +102,11 @@ def _inject_cookies(opts):
 
 def _base_opts():
     return {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
         "geo_bypass": True,
         "retries": 2,
         "socket_timeout": 30,
-        "extractor_args": {"youtube": {"player_client": ["android", "ios", "web"], "player_skip": ["webpage"]}},
-        "http_headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"},
+        "extractor_args": {"youtube": {"player_client": ["mweb", "android", "ios"], "player_skip": ["webpage"]}},
+        "http_headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"},
     }
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
