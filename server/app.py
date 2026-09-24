@@ -101,13 +101,20 @@ def _inject_cookies(opts):
     return opts
 
 def _base_opts():
-    user_agent = os.getenv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
     return {
+        "proxy": "http://qhmqqrbn:a6sflac3xvep@31.59.20.176:6754/",
         "geo_bypass": True,
         "retries": 2,
         "socket_timeout": 30,
-        "extractor_args": {"youtube": {"player_client": ["mweb", "android", "ios"], "player_skip": ["webpage"]}},
-        "http_headers": {"User-Agent": user_agent},
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["mweb", "android", "ios"],
+                "player_skip": ["webpage"]
+            }
+        },
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+        },
     }
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
