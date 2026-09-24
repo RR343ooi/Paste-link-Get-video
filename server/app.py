@@ -108,7 +108,7 @@ def _base_opts():
         "socket_timeout": 30,
         "extractor_args": {
             "youtube": {
-                "player_client": ["mweb", "android", "ios"],
+                "player_client": ["tv", "mweb", "android"],
                 "player_skip": ["webpage"]
             }
         },
