@@ -30,7 +30,7 @@ $('#clearBtn').onclick=()=>{
   urlInput.value='';updateCount();resultsEl.innerHTML='';items=[];bulkBar.classList.add('hidden');statusEl.textContent='';emptyState.style.display='';
 };
 $('#exampleBtn').onclick=()=>{
-  urlInput.value='https://www.youtube.com/watch?v=dQw4w9WgXcQ\nhttps://www.youtube.com/watch?v=jNQXAC9IVRw';
+  urlInput.value='https://x.com/medya3tr/status/2103156250271699248?s=20\nhttps://www.tiktok.com/@qu__y/video/7688788884611681543?is_from_webapp=1&sender_device=pc';
   updateCount();
 };
 urlInput.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter') fetchInfo()});
