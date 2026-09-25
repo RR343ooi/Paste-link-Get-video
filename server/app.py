@@ -50,9 +50,63 @@ def _load_cookies_from_env():
 
 _load_cookies_from_env()
 
+def _repair_cookie_file():
+    """Auto-repair common misconfiguration: file starting with YOUTUBE_COOKIES=" and trailing quote."""
+    if not os.path.exists(COOKIE_FILE):
+        return
+    try:
+        with open(COOKIE_FILE, "r", encoding="utf-8", errors="ignore") as _f:
+            _txt = _f.read()
+        if not _txt.strip().startswith("YOUTUBE_COOKIES="):
+            return
+        # Strip leading VAR=" and trailing "
+        _txt = re.sub(r'^\s*YOUTUBE_COOKIES\s*=\s*"', "", _txt.strip())
+        if _txt.endswith('"'):
+            _txt = _txt[:-1]
+        # Unescape literal \n if the env content was pasted without real newlines
+        if "\\n" in _txt and "\n" not in _txt.strip():
+            _txt = _txt.replace("\\n", "\n")
+        with open(COOKIE_FILE, "w", encoding="utf-8", newline="\n") as _cf:
+            _cf.write(_txt)
+    except Exception:
+        pass
+
+
+_repair_cookie_file()
+
+
 def _is_bot_challenge(msg):
     m = (msg or "").lower()
-    return any(s in m for s in ["sign in to confirm you’re not a bot", "sign in to confirm you're not a bot", "confirm you're not a bot", "confirm you’re not a bot", "use --cookies"])
+    return any(s in m for s in [
+        "sign in to confirm you",
+        "confirm you're not a bot",
+        "confirm you’re not a bot",
+        "use --cookies",
+        "login required",
+        "log in to confirm",
+        "cookies are required",
+        "po_token",
+        "po token",
+        "player response",
+        "got a 403",
+        "http error 403",
+        "forbidden",
+        "captcha",
+        "bot challenge",
+    ])
+
+
+def _is_unavailable_error(msg):
+    m = (msg or "").lower()
+    return any(s in m for s in [
+        "private video",
+        "video unavailable",
+        "no longer available",
+        "removed by the uploader",
+        "age",
+        "join this channel",
+    ])
+
 
 def _has_valid_cookies():
     if not os.path.exists(COOKIE_FILE):
@@ -62,18 +116,23 @@ def _has_valid_cookies():
             return False
         with open(COOKIE_FILE, "r", encoding="utf-8", errors="ignore") as _f:
             _txt = _f.read()
+        # Reject files that still contain the env-var wrapper
+        if _txt.strip().startswith("YOUTUBE_COOKIES="):
+            return False
         _lines = [l for l in _txt.splitlines() if l.strip() and not l.strip().startswith("#")]
         if not _lines:
             return False
-        if "youtube.com" not in _txt and "google.com" not in _txt and "yt-dlp" not in _txt.lower():
+        if "youtube.com" not in _txt and "google.com" not in _txt and "youtu.be" not in _txt:
             return False
         return True
     except Exception:
         return False
 
+
 def _is_format_error(msg):
     m = (msg or "").lower()
     return "requested format is not available" in m or "format is not available" in m
+
 
 def _friendly_bot_error():
     has_file = os.path.exists(COOKIE_FILE)
@@ -81,41 +140,88 @@ def _friendly_bot_error():
     if not has_file:
         hint = "NO server/cookies.txt found and no YOUTUBE_COOKIES env var"
     elif not has_valid:
-        hint = "server/cookies.txt exists but is PLACEHOLDER/invalid (only comments, no youtube.com cookies)"
+        hint = "server/cookies.txt exists but is PLACEHOLDER/invalid (only comments, no youtube.com cookies, or still wrapped in YOUTUBE_COOKIES=\"...\")"
     else:
-        hint = "server/cookies.txt found but YouTube still blocks it (cookies expired or datacenter IP blocked)"
+        hint = "server/cookies.txt found but YouTube still blocks it (cookies expired/logged-out or datacenter IP blocked)"
     return (
-        "YouTube bot check failed (Sign in to confirm you’re not a bot). "
-        f"YouTube is blocking datacenter IPs — {hint}. "
+        "YouTube bot check failed (Sign in to confirm you're not a bot). "
+        f"YouTube is blocking this server IP — {hint}. "
         "Fix: export REAL YouTube cookies (Netscape format) and provide them to the server: "
-        "1) Install 'Get cookies.txt LOCALLY' extension, open youtube.com logged-in, Export -> paste content into server/cookies.txt (replace placeholder), "
+        "1) Install 'Get cookies.txt LOCALLY' extension, open youtube.com logged-in, Export -> paste RAW content into server/cookies.txt (must start with '# Netscape', no YOUTUBE_COOKIES= wrapper), "
         "OR 2) set env var YOUTUBE_COOKIES to the FULL file content (or base64) on your host (Render/Railway/etc), "
         "then redeploy + ensure yt-dlp is latest: pip install -U yt-dlp. "
         "See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
     )
 
+
+def _friendly_unavailable_error():
+    return (
+        "This YouTube video is unavailable (private, deleted, age-restricted, "
+        "or requires login/membership). Try a different video or log in with "
+        "cookies from an account that can watch it."
+    )
+
+
+def _get_proxy():
+    # Never hardcode proxy credentials. Read from env only.
+    for _key in ("YOUTUBE_PROXY", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY",
+                 "https_proxy", "http_proxy", "all_proxy"):
+        _val = (os.getenv(_key) or "").strip().strip('"').strip("'")
+        if _val:
+            return _val
+    return None
+
+
+def _get_po_token():
+    for _key in ("YOUTUBE_PO_TOKEN", "YT_PO_TOKEN"):
+        _val = (os.getenv(_key) or "").strip()
+        if _val:
+            return _val
+    return None
+
+
 def _inject_cookies(opts):
     _load_cookies_from_env()
+    _repair_cookie_file()
     if _has_valid_cookies():
         opts["cookiefile"] = COOKIE_FILE
     return opts
 
-def _base_opts():
-    return {
-        "proxy": "http://qhmqqrbn:a6sflac3xvep@31.59.20.176:6754/",
+
+# Client configs tried in order. YouTube blocks datacenter IPs aggressively;
+# mobile/TV clients historically survive longer than the default web client.
+_CLIENT_FALLBACKS = [
+    {"player_client": ["android", "ios", "mweb"]},
+    {"player_client": ["mweb", "tv"]},
+    {"player_client": ["tv", "android", "mweb"]},
+]
+
+
+def _base_opts(client_args=None):
+    yt_args = dict(client_args) if client_args else dict(_CLIENT_FALLBACKS[0])
+    po_token = _get_po_token()
+    if po_token:
+        # yt-dlp format: "mweb+default:XXXX" or per-client tokens separated by "+"
+        yt_args["po_token"] = [po_token] if isinstance(po_token, str) else po_token
+    opts = {
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
         "geo_bypass": True,
-        "retries": 2,
+        "retries": 5,
+        "fragment_retries": 5,
         "socket_timeout": 30,
         "extractor_args": {
-            "youtube": {
-                "player_client": ["tv", "mweb", "android"],
-                "player_skip": ["webpage"]
-            }
+            "youtube": yt_args,
         },
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         },
     }
+    proxy = _get_proxy()
+    if proxy:
+        opts["proxy"] = proxy
+    return opts
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 CORS(app)
@@ -129,25 +235,50 @@ def _safe_filename(name):
 
 
 def _extract_info(url):
-    base = _base_opts()
-    base.update({"skip_download": True})
-    ydl_opts = _inject_cookies(base)
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception as e:
-        if _is_bot_challenge(str(e)):
-            raise RuntimeError(_friendly_bot_error()) from e
-        raise
-    if "entries" in info:
-        info = next(iter(info["entries"]), info)
+    if not url or not isinstance(url, str) or not url.strip().lower().startswith(("http://", "https://")):
+        raise ValueError("Invalid URL. Paste a full http(s) video URL.")
+    url = url.strip()
+    last_err = None
+    info = None
+    for client_args in _CLIENT_FALLBACKS:
+        base = _base_opts(client_args)
+        base.update({"skip_download": True})
+        ydl_opts = _inject_cookies(base)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            last_err = None
+            break
+        except Exception as e:
+            last_err = e
+            msg = str(e)
+            if _is_bot_challenge(msg):
+                # Try next client before giving up
+                continue
+            if _is_unavailable_error(msg):
+                raise RuntimeError(_friendly_unavailable_error()) from e
+            raise
+    if info is None:
+        if last_err is not None and _is_bot_challenge(str(last_err)):
+            raise RuntimeError(_friendly_bot_error()) from last_err
+        raise last_err or RuntimeError("Failed to analyze URL")
+    if isinstance(info, dict) and "entries" in info:
+        try:
+            entries = list(info["entries"] or [])
+        except TypeError:
+            entries = []
+        if entries:
+            info = entries[0]
     formats = []
     seen = set()
     for f in info.get("formats") or []:
         height = f.get("height")
         ext = f.get("ext")
         fid = f.get("format_id")
-        if height and ext in ("mp4", "webm", "mov") and height not in seen:
+        vcodec = (f.get("vcodec") or "none")
+        if height and ext in ("mp4", "webm", "mov", "m4a", "mp3") and height not in seen:
+            if vcodec == "none" and len(formats) > 0:
+                continue
             seen.add(height)
             formats.append({
                 "format_id": fid,
@@ -161,6 +292,7 @@ def _extract_info(url):
         formats = [{"format_id": "best", "height": 0, "ext": "mp4", "label": "Best"}]
     return {
         "url": url,
+        "id": info.get("id"),
         "title": info.get("title") or "Untitled",
         "thumbnail": info.get("thumbnail"),
         "duration": info.get("duration"),
@@ -187,82 +319,134 @@ def _download_task(task_id, url, quality, mode):
                 with _download_lock:
                     _active_downloads[task_id]["progress"] = 100
 
-        tmpl = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
+        tmpl = os.path.join(DOWNLOAD_DIR, "%(title)s [%(id)s].%(ext)s")
         base_common = _base_opts()
-        base_common.update({"outtmpl": tmpl, "progress_hooks": [hook]})
+        base_common.update({
+            "outtmpl": tmpl,
+            "progress_hooks": [hook],
+            "windowsfilenames": True,
+            "overwrites": True,
+            "noplaylist": True,
+        })
         info = None
         filename = ""
         last_err = None
+
+        def _try_download(opts_dict):
+            nonlocal info, filename
+            ydl_opts = _inject_cookies(opts_dict)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+                # prepare_filename returns pre-merge/postprocessor name; fix ext
+                if opts_dict.get("merge_output_format") and filename:
+                    base_p = os.path.splitext(filename)[0]
+                    merged = base_p + "." + opts_dict["merge_output_format"]
+                    if os.path.exists(merged):
+                        filename = merged
+
         if mode == "audio":
-            base_common.update({
+            audio_opts = dict(base_common)
+            audio_opts.update({
                 "format": "bestaudio/best",
                 "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
             })
-            ydl_opts = _inject_cookies(dict(base_common))
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    filename = ydl.prepare_filename(info)
-            except Exception as e:
-                if _is_bot_challenge(str(e)):
-                    raise RuntimeError(_friendly_bot_error()) from e
-                raise
+            tried = False
+            for client_args in _CLIENT_FALLBACKS:
+                cur = dict(audio_opts)
+                cur["extractor_args"] = {"youtube": dict(client_args)}
+                if _get_po_token():
+                    cur["extractor_args"]["youtube"]["po_token"] = [_get_po_token()]
+                if _get_proxy():
+                    cur["proxy"] = _get_proxy()
+                try:
+                    _try_download(cur)
+                    tried = True
+                    break
+                except Exception as e:
+                    last_err = e
+                    if _is_bot_challenge(str(e)):
+                        continue  # try next client
+                    if _is_unavailable_error(str(e)):
+                        raise RuntimeError(_friendly_unavailable_error()) from e
+                    raise
+            if not tried:
+                if last_err is not None and _is_bot_challenge(str(last_err)):
+                    raise RuntimeError(_friendly_bot_error()) from last_err
+                raise last_err or RuntimeError("Audio download failed")
         else:
             q = str(quality or "best").strip().lower().replace("p", "")
             if q != "best" and q.isdigit():
                 fmts = [
-                    f"bestvideo[height<={q}]+bestaudio/best[height<={q}]/best",
-                    "bestvideo+bestaudio/best",
-                    "best",
+                    f"bv*[height<={q}]+ba/b[height<={q}]/b",
+                    "bv*+ba/b",
+                    "b",
                 ]
             else:
-                fmts = ["bestvideo+bestaudio/best", "best"]
-            for fmt in fmts:
-                try:
-                    cur = dict(base_common)
-                    cur.update({"format": fmt, "merge_output_format": "mp4"})
-                    ydl_opts = _inject_cookies(cur)
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(url, download=True)
-                        filename = ydl.prepare_filename(info)
-                    last_err = None
+                fmts = ["bv*+ba/b", "b"]
+            downloaded = False
+            for client_args in _CLIENT_FALLBACKS:
+                if downloaded:
                     break
-                except Exception as e:
-                    if _is_bot_challenge(str(e)):
-                        raise RuntimeError(_friendly_bot_error()) from e
-                    if _is_format_error(str(e)):
-                        last_err = e
-                        if fmt != fmts[-1]:
-                            continue
-                        try:
-                            fallback_opts = {"outtmpl": tmpl, "quiet": True, "no_warnings": True, "noplaylist": True, "format": "best", "progress_hooks": [hook]}
-                            fallback_opts = _inject_cookies(fallback_opts)
-                            with yt_dlp.YoutubeDL(fallback_opts) as ydl2:
-                                info = ydl2.extract_info(url, download=True)
-                                filename = ydl2.prepare_filename(info)
-                            last_err = None
-                            break
-                        except Exception as e2:
-                            if _is_bot_challenge(str(e2)):
-                                raise RuntimeError(_friendly_bot_error()) from e2
-                            raise e2
-                    raise
-            if last_err is not None and info is None:
-                raise last_err
+                for fmt in fmts:
+                    try:
+                        cur = dict(base_common)
+                        cur["extractor_args"] = {"youtube": dict(client_args)}
+                        if _get_po_token():
+                            cur["extractor_args"]["youtube"]["po_token"] = [_get_po_token()]
+                        if _get_proxy():
+                            cur["proxy"] = _get_proxy()
+                        cur.update({"format": fmt, "merge_output_format": "mp4"})
+                        _try_download(cur)
+                        last_err = None
+                        downloaded = True
+                        break
+                    except Exception as e:
+                        if _is_bot_challenge(str(e)):
+                            last_err = e
+                            break  # try next client, not next format
+                        if _is_unavailable_error(str(e)):
+                            raise RuntimeError(_friendly_unavailable_error()) from e
+                        if _is_format_error(str(e)):
+                            last_err = e
+                            continue  # try next format
+                        raise
+            if not downloaded:
+                if last_err is not None and _is_bot_challenge(str(last_err)):
+                    raise RuntimeError(_friendly_bot_error()) from last_err
+                if last_err is not None:
+                    raise last_err
+                raise RuntimeError("Video download failed")
         try:
-            info_title = info.get("title", "") if isinstance(info, dict) else ""
+            info_id = info.get("id", "") if isinstance(info, dict) else ""
         except Exception:
-            info_title = ""
+            info_id = ""
         if mode == "audio":
             base_p = os.path.splitext(filename)[0]
             mp3 = base_p + ".mp3"
             if os.path.exists(mp3):
                 filename = mp3
-        else:
-            if filename and not os.path.exists(filename):
-                cand = globmod.glob(os.path.join(DOWNLOAD_DIR, _safe_filename(info_title) + ".*"))
+            elif filename and not os.path.exists(filename) and info_id:
+                cand = globmod.glob(os.path.join(DOWNLOAD_DIR, f"*{info_id}*.mp3"))
                 if cand:
                     filename = cand[0]
+        else:
+            if filename and not os.path.exists(filename):
+                if info_id:
+                    cand = globmod.glob(os.path.join(DOWNLOAD_DIR, f"*{info_id}.*"))
+                    if cand:
+                        # prefer mp4, then newest
+                        cand.sort(key=lambda p: (not p.lower().endswith(".mp4"), -os.path.getmtime(p)))
+                        filename = cand[0]
+                if not os.path.exists(filename or ""):
+                    # last resort: newest file in downloads dir
+                    try:
+                        all_files = [os.path.join(DOWNLOAD_DIR, f) for f in os.listdir(DOWNLOAD_DIR)]
+                        all_files = [p for p in all_files if os.path.isfile(p)]
+                        if all_files:
+                            filename = max(all_files, key=os.path.getmtime)
+                    except Exception:
+                        pass
         fname = os.path.basename(filename) if filename else ""
         with _download_lock:
             _active_downloads[task_id]["status"] = "completed"
