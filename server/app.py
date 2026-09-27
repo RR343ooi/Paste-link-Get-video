@@ -13,6 +13,34 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 COOKIE_FILE = os.path.join(BASE_DIR, "cookies.txt")
 
+YOUTUBE_BLOCKED_MESSAGE = "This app does not currently support YouTube."
+YOUTUBE_URL_PATTERNS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+# Catch-all patterns: any yt-dlp error mentioning these gets overridden
+# with the clean user-facing message above.
+YOUTUBE_ERROR_PATTERNS = (
+    "youtube",
+    "youtu.be",
+    "cookies",
+    "cookie",
+    "bot check",
+    "sign in to confirm",
+    "confirm you're not a bot",
+    "confirm you’re not a bot",
+)
+
+
+def _is_youtube_url(url):
+    """Block YouTube before yt-dlp ever sees the URL (no network, no cookies)."""
+    if not url or not isinstance(url, str):
+        return False
+    return any(p in url.lower() for p in YOUTUBE_URL_PATTERNS)
+
+
+def _is_youtube_related_error(msg):
+    """Catch-all: map YouTube/cookie/bot-check failures to one clean message."""
+    m = (msg or "").lower()
+    return any(s in m for s in YOUTUBE_ERROR_PATTERNS)
+
 def _load_cookies_from_env():
     for _key in ("YOUTUBE_COOKIES", "YTDLP_COOKIES", "COOKIES"):
         _val = os.getenv(_key)
@@ -238,6 +266,9 @@ def _extract_info(url):
     if not url or not isinstance(url, str) or not url.strip().lower().startswith(("http://", "https://")):
         raise ValueError("Invalid URL. Paste a full http(s) video URL.")
     url = url.strip()
+    # 1) Hard block: never let yt-dlp touch a YouTube URL.
+    if _is_youtube_url(url):
+        raise RuntimeError(YOUTUBE_BLOCKED_MESSAGE)
     last_err = None
     info = None
     for client_args in _CLIENT_FALLBACKS:
@@ -252,6 +283,9 @@ def _extract_info(url):
         except Exception as e:
             last_err = e
             msg = str(e)
+            # 2) Catch-all: never leak cookie/bot-check traces for YouTube.
+            if _is_youtube_related_error(msg):
+                raise RuntimeError(YOUTUBE_BLOCKED_MESSAGE) from e
             if _is_bot_challenge(msg):
                 # Try next client before giving up
                 continue
@@ -259,8 +293,10 @@ def _extract_info(url):
                 raise RuntimeError(_friendly_unavailable_error()) from e
             raise
     if info is None:
-        if last_err is not None and _is_bot_challenge(str(last_err)):
-            raise RuntimeError(_friendly_bot_error()) from last_err
+        if last_err is not None and (
+            _is_youtube_related_error(str(last_err)) or _is_bot_challenge(str(last_err))
+        ):
+            raise RuntimeError(YOUTUBE_BLOCKED_MESSAGE) from last_err
         raise last_err or RuntimeError("Failed to analyze URL")
     if isinstance(info, dict) and "entries" in info:
         try:
@@ -304,6 +340,9 @@ def _extract_info(url):
 
 def _download_task(task_id, url, quality, mode):
     try:
+        # 1) Hard block: never let yt-dlp touch a YouTube URL.
+        if _is_youtube_url(url):
+            raise RuntimeError(YOUTUBE_BLOCKED_MESSAGE)
         with _download_lock:
             _active_downloads[task_id]["status"] = "downloading"
             _active_downloads[task_id]["progress"] = 0
@@ -365,14 +404,18 @@ def _download_task(task_id, url, quality, mode):
                     break
                 except Exception as e:
                     last_err = e
+                    if _is_youtube_related_error(str(e)):
+                        raise RuntimeError(YOUTUBE_BLOCKED_MESSAGE) from e
                     if _is_bot_challenge(str(e)):
                         continue  # try next client
                     if _is_unavailable_error(str(e)):
                         raise RuntimeError(_friendly_unavailable_error()) from e
                     raise
             if not tried:
-                if last_err is not None and _is_bot_challenge(str(last_err)):
-                    raise RuntimeError(_friendly_bot_error()) from last_err
+                if last_err is not None and (
+                    _is_youtube_related_error(str(last_err)) or _is_bot_challenge(str(last_err))
+                ):
+                    raise RuntimeError(YOUTUBE_BLOCKED_MESSAGE) from last_err
                 raise last_err or RuntimeError("Audio download failed")
         else:
             q = str(quality or "best").strip().lower().replace("p", "")
@@ -402,6 +445,8 @@ def _download_task(task_id, url, quality, mode):
                         downloaded = True
                         break
                     except Exception as e:
+                        if _is_youtube_related_error(str(e)):
+                            raise RuntimeError(YOUTUBE_BLOCKED_MESSAGE) from e
                         if _is_bot_challenge(str(e)):
                             last_err = e
                             break  # try next client, not next format
@@ -412,8 +457,10 @@ def _download_task(task_id, url, quality, mode):
                             continue  # try next format
                         raise
             if not downloaded:
-                if last_err is not None and _is_bot_challenge(str(last_err)):
-                    raise RuntimeError(_friendly_bot_error()) from last_err
+                if last_err is not None and (
+                    _is_youtube_related_error(str(last_err)) or _is_bot_challenge(str(last_err))
+                ):
+                    raise RuntimeError(YOUTUBE_BLOCKED_MESSAGE) from last_err
                 if last_err is not None:
                     raise last_err
                 raise RuntimeError("Video download failed")
@@ -453,14 +500,56 @@ def _download_task(task_id, url, quality, mode):
             _active_downloads[task_id]["filename"] = fname
             _active_downloads[task_id]["progress"] = 100
     except Exception as e:
+        # 2) Catch-all: normalize any YouTube/cookie/bot-check leak.
+        if _is_youtube_url(url) or _is_youtube_related_error(str(e)):
+            err_msg = YOUTUBE_BLOCKED_MESSAGE
+        else:
+            err_msg = str(e)
         with _download_lock:
             _active_downloads[task_id]["status"] = "error"
-            _active_downloads[task_id]["error"] = str(e)
+            _active_downloads[task_id]["error"] = err_msg
 
 
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/about")
+def about():
+    return render_template("about.html")
+
+
+@app.route("/contact")
+def contact():
+    return render_template("contact.html")
+
+
+@app.route("/privacy-policy")
+def privacy_policy():
+    return render_template("privacy-policy.html")
+
+
+@app.route("/terms")
+@app.route("/terms-of-use")
+def terms_of_use():
+    return render_template("terms-of-use.html")
+
+
+@app.route("/disclaimer")
+def disclaimer():
+    return render_template("disclaimer.html")
+
+
+@app.route("/copyright")
+@app.route("/dmca")
+def dmca():
+    return render_template("dmca.html")
+
+
+@app.route("/why-no-private-downloader")
+def why_no_private():
+    return render_template("why-no-private-downloader.html")
 
 
 @app.route("/favicon.ico")
@@ -481,13 +570,20 @@ def analyze():
     urls = [u.strip() for u in urls if u and u.strip()]
     if not urls:
         return jsonify({"error": "No URLs provided"}), 400
+    # Fast fail: block YouTube before yt-dlp (no network, no cookies).
+    if any(_is_youtube_url(u) for u in urls):
+        return jsonify({"error": YOUTUBE_BLOCKED_MESSAGE}), 400
     results = []
     for url in urls:
         try:
             info = _extract_info(url)
             results.append({**info, "status": "ok"})
         except Exception as e:
-            results.append({"url": url, "status": "error", "error": str(e)})
+            msg = str(e)
+            # Catch-all: hide raw cookie/bot-check traces.
+            if _is_youtube_related_error(msg):
+                msg = YOUTUBE_BLOCKED_MESSAGE
+            results.append({"url": url, "status": "error", "error": msg})
     return jsonify({"results": results})
 
 
@@ -506,6 +602,8 @@ def download_video():
     url = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "url required"}), 400
+    if _is_youtube_url(url):
+        return jsonify({"error": YOUTUBE_BLOCKED_MESSAGE}), 400
     quality = str(data.get("quality") or "best")
     task_id = _start_download(url, quality, "video")
     return jsonify({"task_id": task_id})
@@ -517,6 +615,8 @@ def download_audio():
     url = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "url required"}), 400
+    if _is_youtube_url(url):
+        return jsonify({"error": YOUTUBE_BLOCKED_MESSAGE}), 400
     task_id = _start_download(url, "best", "audio")
     return jsonify({"task_id": task_id})
 
@@ -530,6 +630,8 @@ def download_all():
     urls = [u.strip() for u in urls if u and u.strip()]
     if not urls:
         return jsonify({"error": "urls required"}), 400
+    if any(_is_youtube_url(u) for u in urls):
+        return jsonify({"error": YOUTUBE_BLOCKED_MESSAGE}), 400
     quality = str(data.get("quality") or "best")
     mode = data.get("mode") or "video"
     if mode not in ("video", "audio"):
