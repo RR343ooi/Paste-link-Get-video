@@ -7,6 +7,43 @@ const urlInput=$('#urlInput');
 const linkCount=$('#linkCount');
 const emptyState=$('#emptyState');
 let items=[];
+// --- Per-user Downloads isolation (client side) ---
+// The backend now filters /api/downloads by Flask session cookie, so one
+// user never sees another's files. As a second layer, keep this browser's
+// own finished downloads in localStorage and render only those.
+const MY_FILES_KEY='fmd_my_downloads_v1';
+function isHiddenFile(name){
+  const b=String(name||'').split('/').pop();
+  if(!b) return true;
+  if(b==='.gitkeep'||b==='.gitignore'||b==='.DS_Store') return true;
+  if(b.startsWith('.')) return true;
+  return false;
+}
+function getMyFiles(){
+  try{
+    const raw=localStorage.getItem(MY_FILES_KEY);
+    const arr=raw?JSON.parse(raw):[];
+    return Array.isArray(arr)?arr.filter(f=>f&&f.filename&&!isHiddenFile(f.filename)):[];
+  }catch{return [];}
+}
+function saveMyFile(entry){
+  if(!entry||!entry.filename||isHiddenFile(entry.filename)) return;
+  const list=getMyFiles().filter(f=>f.filename!==entry.filename);
+  list.unshift({filename:entry.filename,size:entry.size||0,ts:Date.now()});
+  try{localStorage.setItem(MY_FILES_KEY,JSON.stringify(list.slice(0,100)));}catch{}
+}
+function renderMyFiles(extraByName){
+  const el=$('#fileList');
+  const mine=getMyFiles();
+  // Merge server sizes (session-filtered) without ever adding foreign names:
+  // only filenames already in localStorage OR returned by our own session.
+  const merged=mine.map(f=>{
+    const extra=extraByName&&extraByName[f.filename];
+    return extra!=null?{...f,size:extra}:f;
+  });
+  if(!merged.length){el.textContent='No files yet.';return;}
+  el.innerHTML=merged.map(f=>`<div class="file"><span>${esc(f.filename)} <span class="muted">(${(f.size/1024/1024).toFixed(1)} MB)</span></span><a href="/api/downloads/${encodeURIComponent(f.filename)}">Download</a></div>`).join('');
+}
 // Clean user-facing error: never show raw cookie/bot-check traces or stack traces.
 const YOUTUBE_BLOCKED='This app does not currently support YouTube.';
 function friendlyError(msg){
@@ -99,7 +136,7 @@ async function poll(id,bar,prog,out){
       const j=await r.json();
       if(!r.ok) throw new Error(friendlyError(j.error));
       bar.style.width=(j.progress||0)+'%';
-      if(j.status==='completed'){clearInterval(t);out.innerHTML=`Done — <a href="/api/downloads/${encodeURIComponent(j.filename)}">Download ${esc(j.filename)}</a>`;prog.classList.add('hidden');loadFiles();}
+      if(j.status==='completed'){clearInterval(t);out.innerHTML=`Done — <a href="/api/downloads/${encodeURIComponent(j.filename)}">Download ${esc(j.filename)}</a>`;prog.classList.add('hidden');if(j.filename&&!isHiddenFile(j.filename)){saveMyFile({filename:j.filename});loadFiles();}}
       else if(j.status==='error'){clearInterval(t);out.textContent='Error: '+friendlyError(j.error||'unknown');}
       else{out.textContent=j.status+' '+(j.progress||0)+'%';}
     }catch(e){clearInterval(t);out.textContent=friendlyError(e.message);}
@@ -122,11 +159,20 @@ async function downloadAll(mode){
   });
 }
 async function loadFiles(){
+  // Render this browser's own list instantly, then reconcile sizes with the
+  // session-filtered /api/downloads response (which only contains our files).
+  renderMyFiles();
   try{
     const r=await fetch('/api/downloads');const j=await r.json();
-    const el=$('#fileList');
-    if(!j.files.length){el.textContent='No files yet.';return;}
-    el.innerHTML=j.files.map(f=>`<div class="file"><span>${f.filename} <span class="muted">(${(f.size/1024/1024).toFixed(1)} MB)</span></span><a href="/api/downloads/${encodeURIComponent(f.filename)}">Download</a></div>`).join('');
+    if(!r.ok) return;
+    const byName={};
+    (j.files||[]).forEach(f=>{if(f&&f.filename&&!isHiddenFile(f.filename)) byName[f.filename]=f.size||0;});
+    // Adopt server-known files into localStorage (e.g. after storage was cleared
+    // but the session cookie is still valid) — server list is already per-session.
+    Object.keys(byName).forEach(name=>{
+      if(!getMyFiles().some(f=>f.filename===name)) saveMyFile({filename:name,size:byName[name]});
+    });
+    renderMyFiles(byName);
   }catch{}
 }
 $('#fetchBtn').onclick=fetchInfo;

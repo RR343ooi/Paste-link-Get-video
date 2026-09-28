@@ -3,7 +3,7 @@ import re
 import uuid
 import threading
 import glob as globmod
-from flask import Flask, request, jsonify, send_from_directory, render_template
+from flask import Flask, request, jsonify, send_from_directory, render_template, session
 from flask_cors import CORS
 import yt_dlp
 
@@ -253,9 +253,63 @@ def _base_opts(client_args=None):
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 CORS(app)
+# Session cookie used only to isolate each visitor's download list.
+# Override in production: set env FLASK_SECRET_KEY to a long random value.
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-only-change-me")
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+)
 
 _active_downloads = {}
 _download_lock = threading.Lock()
+# sid (Flask session uid) -> set of filenames this session created.
+# Populated by background download threads (which cannot touch the
+# request-bound `session` object), read by /api/downloads + file serving.
+_session_files = {}
+
+
+def _is_visible_file(name):
+    """Hide internal/utility files from every user's Downloads list."""
+    if not name or name in (".gitkeep", ".gitignore", ".DS_Store"):
+        return False
+    if os.path.basename(name).startswith("."):
+        return False
+    return True
+
+
+def _get_sid():
+    """Return the stable per-browser id, creating it on first visit."""
+    sid = session.get("uid")
+    if not sid:
+        sid = uuid.uuid4().hex
+        session["uid"] = sid
+        session.permanent = True
+    return sid
+
+
+def _add_session_file(sid, filename):
+    if not sid or not filename or not _is_visible_file(filename):
+        return
+    with _download_lock:
+        _session_files.setdefault(sid, set()).add(filename)
+
+
+def _owns_file(sid, filename):
+    """True if this session created the file (via a completed task or registry)."""
+    if not sid or not filename or not _is_visible_file(filename):
+        return False
+    with _download_lock:
+        if filename in _session_files.get(sid, set()):
+            return True
+        for info in _active_downloads.values():
+            if (
+                info.get("owner") == sid
+                and info.get("status") == "completed"
+                and info.get("filename") == filename
+            ):
+                return True
+    return False
 
 
 def _safe_filename(name):
@@ -338,7 +392,7 @@ def _extract_info(url):
     }
 
 
-def _download_task(task_id, url, quality, mode):
+def _download_task(task_id, url, quality, mode, owner_sid=None):
     try:
         # 1) Hard block: never let yt-dlp touch a YouTube URL.
         if _is_youtube_url(url):
@@ -499,6 +553,8 @@ def _download_task(task_id, url, quality, mode):
             _active_downloads[task_id]["status"] = "completed"
             _active_downloads[task_id]["filename"] = fname
             _active_downloads[task_id]["progress"] = 100
+            if owner_sid and fname and _is_visible_file(fname):
+                _session_files.setdefault(owner_sid, set()).add(fname)
     except Exception as e:
         # 2) Catch-all: normalize any YouTube/cookie/bot-check leak.
         if _is_youtube_url(url) or _is_youtube_related_error(str(e)):
@@ -587,11 +643,11 @@ def analyze():
     return jsonify({"results": results})
 
 
-def _start_download(url, quality, mode):
+def _start_download(url, quality, mode, owner_sid=None):
     task_id = uuid.uuid4().hex[:12]
     with _download_lock:
-        _active_downloads[task_id] = {"status": "queued", "progress": 0, "url": url, "mode": mode, "quality": quality}
-    t = threading.Thread(target=_download_task, args=(task_id, url, quality, mode), daemon=True)
+        _active_downloads[task_id] = {"status": "queued", "progress": 0, "url": url, "mode": mode, "quality": quality, "owner": owner_sid}
+    t = threading.Thread(target=_download_task, args=(task_id, url, quality, mode, owner_sid), daemon=True)
     t.start()
     return task_id
 
@@ -605,7 +661,7 @@ def download_video():
     if _is_youtube_url(url):
         return jsonify({"error": YOUTUBE_BLOCKED_MESSAGE}), 400
     quality = str(data.get("quality") or "best")
-    task_id = _start_download(url, quality, "video")
+    task_id = _start_download(url, quality, "video", _get_sid())
     return jsonify({"task_id": task_id})
 
 
@@ -617,7 +673,7 @@ def download_audio():
         return jsonify({"error": "url required"}), 400
     if _is_youtube_url(url):
         return jsonify({"error": YOUTUBE_BLOCKED_MESSAGE}), 400
-    task_id = _start_download(url, "best", "audio")
+    task_id = _start_download(url, "best", "audio", _get_sid())
     return jsonify({"task_id": task_id})
 
 
@@ -636,36 +692,64 @@ def download_all():
     mode = data.get("mode") or "video"
     if mode not in ("video", "audio"):
         mode = "video"
+    sid = _get_sid()
     task_ids = []
     for url in urls:
         q = quality if mode == "video" else "best"
-        task_ids.append({"url": url, "task_id": _start_download(url, q, mode)})
+        task_ids.append({"url": url, "task_id": _start_download(url, q, mode, sid)})
     return jsonify({"tasks": task_ids})
 
 
 @app.route("/api/download/status/<task_id>")
 def download_status(task_id):
+    sid = _get_sid()
     with _download_lock:
         info = _active_downloads.get(task_id)
         if not info:
+            return jsonify({"error": "task not found"}), 404
+        # Privacy: never reveal another session's task (same 404 shape).
+        if info.get("owner") and info.get("owner") != sid:
             return jsonify({"error": "task not found"}), 404
         return jsonify({"task_id": task_id, **info})
 
 
 @app.route("/api/downloads")
 def list_downloads():
+    """Return ONLY files created by the current session (never os.listdir globally)."""
+    sid = _get_sid()
     files = []
-    for f in os.listdir(DOWNLOAD_DIR):
-        fp = os.path.join(DOWNLOAD_DIR, f)
+    with _download_lock:
+        owned = set(_session_files.get(sid, set()))
+        for info in _active_downloads.values():
+            if info.get("owner") == sid and info.get("status") == "completed" and info.get("filename"):
+                owned.add(info["filename"])
+    for fname in owned:
+        if not _is_visible_file(fname):
+            continue
+        fp = os.path.join(DOWNLOAD_DIR, fname)
+        # Guard against path traversal entries.
+        if os.path.basename(fname) != fname:
+            continue
         if os.path.isfile(fp):
-            files.append({"filename": f, "size": os.path.getsize(fp)})
+            try:
+                files.append({"filename": fname, "size": os.path.getsize(fp)})
+            except OSError:
+                continue
     files.sort(key=lambda x: x["filename"])
     return jsonify({"files": files})
 
 
 @app.route("/api/downloads/<path:filename>")
 def serve_download(filename):
-    return send_from_directory(DOWNLOAD_DIR, filename, as_attachment=True)
+    sid = _get_sid()
+    base = os.path.basename(filename or "")
+    # Block utility/dot files and path traversal for every user.
+    if not base or not _is_visible_file(base) or base != filename:
+        return jsonify({"error": "file not found"}), 404
+    # Privacy: only the owning session may download its own file.
+    if not _owns_file(sid, base):
+        return jsonify({"error": "file not found"}), 404
+    return send_from_directory(DOWNLOAD_DIR, base, as_attachment=True)
 
 
 if __name__ == "__main__":
