@@ -753,13 +753,12 @@ def serve_download(filename):
 
 
 @app.route('/sitemap.xml')
-def sitemap():
-    return send_from_directory('static', 'sitemap.xml')
+def serve_sitemap():
+    return send_from_directory(os.path.join(app.root_path, 'static'), 'sitemap.xml')
 
-
-    @app.route('/google42756cd1fa6be812.html')
-def google_verification():
-    return send_from_directory('static', 'google42756cd1fa6be812.html')
+@app.route('/google42756cd1fa6be812.html')
+def serve_google_verification():
+    return send_from_directory(os.path.join(app.root_path, 'static'), 'google42756cd1fa6be812.html')
 
 
 if __name__ == "__main__":
