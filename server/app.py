@@ -757,5 +757,10 @@ def sitemap():
     return send_from_directory('static', 'sitemap.xml')
 
 
+    @app.route('/google42756cd1fa6be812.html')
+def google_verification():
+    return send_from_directory('static', 'google42756cd1fa6be812.html')
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
