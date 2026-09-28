@@ -752,5 +752,10 @@ def serve_download(filename):
     return send_from_directory(DOWNLOAD_DIR, base, as_attachment=True)
 
 
+@app.route('/sitemap.xml')
+def sitemap():
+    return send_from_directory('static', 'sitemap.xml')
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
