@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Terms of Use — Paste Link Get Video</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+<main class="legal-wrap">
+  <div class="legal-top"><a class="legal-back" href="{{ url_for('index') }}">&larr; Back to downloader</a></div>
+  <article class="card legal-card">
+    <h1>Terms of Use</h1>
+    <p class="legal-updated">Last updated: 2026</p>
+    <p>By using Paste Link Get Video you agree to these terms.</p>
+    <h2>Allowed use</h2>
+    <ul>
+      <li>Download only public content you have the right to save for offline use.</li>
+      <li>Respect the source platform's terms and the rights of creators.</li>
+    </ul>
+    <h2>Prohibited use</h2>
+    <ul>
+      <li>No downloading of private, login-only, stolen, or infringing content.</li>
+      <li>No abuse, automated scraping, or attempts to disrupt the service.</li>
+    </ul>
+    <h2>Service provided "as is"</h2>
+    <p>The service is provided without warranties. Availability of any given video depends on the source platform and may change at any time.</p>
+  </article>
+</main>
+{% include '_footer.html' %}
+</body>
+</html>

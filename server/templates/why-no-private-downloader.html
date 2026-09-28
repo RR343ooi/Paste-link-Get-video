@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Why No Private Downloader — Paste Link Get Video</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+<main class="legal-wrap">
+  <div class="legal-top"><a class="legal-back" href="{{ url_for('index') }}">&larr; Back to downloader</a></div>
+  <article class="card legal-card">
+    <h1>Why No Private Downloader</h1>
+    <p class="legal-updated">Public content only — by design.</p>
+    <p>Paste Link Get Video intentionally does not support private, login-only, or paid videos. That is not a missing feature — it is a safety and legal choice.</p>
+    <h2>Reasons</h2>
+    <ul>
+      <li><strong>Privacy:</strong> private videos belong to their owner and invited viewers only. Bypassing that would violate their privacy.</li>
+      <li><strong>Security:</strong> private downloading would require your login cookies or credentials — we never ask for them.</li>
+      <li><strong>Copyright:</strong> most private or paid content is not licensed for downloading. We stay on the public, lawful side.</li>
+    </ul>
+    <p>If a video needs a login, membership, or private link to view, please don't try to download it here — it will fail by design.</p>
+  </article>
+</main>
+{% include '_footer.html' %}
+</body>
+</html>

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Contact — Paste Link Get Video</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+<main class="legal-wrap">
+  <div class="legal-top"><a class="legal-back" href="{{ url_for('index') }}">&larr; Back to downloader</a></div>
+  <article class="card legal-card">
+    <h1>Contact</h1>
+    <p class="legal-updated">We read every message.</p>
+    <p>For bug reports, takedown requests, or general questions about Paste Link Get Video, contact us. Please include the URL you tried and the error message you saw.</p>
+    <h2>How to reach us</h2>
+    <ul>
+      <li>Copyright / DMCA issues: see <a href="{{ url_for('dmca') }}">DMCA / Copyright</a> for the fastest path.</li>
+      <li>General questions: use the contact email published on our domain contact page.</li>
+    </ul>
+    <p>We only support public content. We cannot help with private, login-only, or paid videos.</p>
+  </article>
+</main>
+{% include '_footer.html' %}
+</body>
+</html>

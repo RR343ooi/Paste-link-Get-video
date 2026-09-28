@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>DMCA / Copyright — Paste Link Get Video</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+<main class="legal-wrap">
+  <div class="legal-top"><a class="legal-back" href="{{ url_for('index') }}">&larr; Back to downloader</a></div>
+  <article class="card legal-card">
+    <h1>DMCA / Copyright</h1>
+    <p class="legal-updated">Last updated: 2026</p>
+    <p>We respect copyright and support only downloading of public content you are allowed to save. We do not host media files.</p>
+    <h2>Filing a notice</h2>
+    <p>If you believe your copyrighted work has been misused via this site, send a notice including:</p>
+    <ol>
+      <li>Identification of the copyrighted work.</li>
+      <li>The URL submitted to our service and the date.</li>
+      <li>Your name, address, email, and a good-faith statement.</li>
+      <li>Your physical or electronic signature.</li>
+    </ol>
+    <p>Contact us via <a href="{{ url_for('contact') }}">Contact</a>. Valid notices are reviewed promptly and abusive or repeat infringing use is blocked.</p>
+  </article>
+</main>
+{% include '_footer.html' %}
+</body>
+</html>

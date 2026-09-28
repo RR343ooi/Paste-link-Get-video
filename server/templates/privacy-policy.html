@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Privacy Policy — Paste Link Get Video</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+<main class="legal-wrap">
+  <div class="legal-top"><a class="legal-back" href="{{ url_for('index') }}">&larr; Back to downloader</a></div>
+  <article class="card legal-card">
+    <h1>Privacy Policy</h1>
+    <p class="legal-updated">Last updated: 2026</p>
+    <p>Paste Link Get Video requires no login and is designed to store as little as possible.</p>
+    <h2>What we collect</h2>
+    <ul>
+      <li>URLs you submit — used only to fetch video info and prepare your download, then discarded from active processing.</li>
+      <li>Basic server logs (e.g. IP address, user agent) for security and abuse prevention.</li>
+    </ul>
+    <h2>What we don't do</h2>
+    <ul>
+      <li>No accounts, no tracking profiles, no sale of personal data.</li>
+      <li>No permanent storage of your pasted links tied to your identity.</li>
+    </ul>
+    <h2>Cookies</h2>
+    <p>We do not set advertising cookies. Strictly necessary technical storage may be used by the browser or hosting provider.</p>
+    <h2>Third parties</h2>
+    <p>When you submit a URL, our server contacts the source platform to retrieve public video metadata. Those platforms have their own privacy policies.</p>
+  </article>
+</main>
+{% include '_footer.html' %}
+</body>
+</html>

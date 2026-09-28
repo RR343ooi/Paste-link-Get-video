@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Disclaimer — Paste Link Get Video</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+<main class="legal-wrap">
+  <div class="legal-top"><a class="legal-back" href="{{ url_for('index') }}">&larr; Back to downloader</a></div>
+  <article class="card legal-card">
+    <h1>Disclaimer</h1>
+    <p class="legal-updated">Last updated: 2026</p>
+    <p>Paste Link Get Video is an independent tool. It is not affiliated with, endorsed by, or sponsored by YouTube, TikTok, Facebook, or Instagram.</p>
+    <ul>
+      <li>We do not host any media files on our servers.</li>
+      <li>All trademarks and content belong to their respective owners.</li>
+      <li>You are responsible for ensuring you have the right to download any content.</li>
+    </ul>
+    <p>If you are a rights holder and believe content was processed in error, please see <a href="{{ url_for('dmca') }}">DMCA / Copyright</a>.</p>
+  </article>
+</main>
+{% include '_footer.html' %}
+</body>
+</html>

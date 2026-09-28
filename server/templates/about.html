@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>About — Paste Link Get Video</title>
+<link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+</head>
+<body>
+<main class="legal-wrap">
+  <div class="legal-top"><a class="legal-back" href="{{ url_for('index') }}">&larr; Back to downloader</a></div>
+  <article class="card legal-card">
+    <h1>About</h1>
+    <p class="legal-updated">Paste Link Get Video</p>
+    <p>Paste Link Get Video is a fast, clean downloader for public video content. Paste a link, fetch available formats, and save MP4 or MP3 for offline viewing.</p>
+    <h2>What we do</h2>
+    <ul>
+      <li>Fetch publicly available video info from a pasted URL.</li>
+      <li>Let you pick quality and download MP4 video or MP3 audio.</li>
+      <li>Require no login and store nothing about you.</li>
+    </ul>
+    <h2>What we don't do</h2>
+    <ul>
+      <li>No private, login-only, or paid content downloading.</li>
+      <li>No hosting of media files — files pass through only for your download.</li>
+      <li>No affiliation with YouTube, TikTok, Facebook, or Instagram.</li>
+    </ul>
+  </article>
+</main>
+{% include '_footer.html' %}
+</body>
+</html>

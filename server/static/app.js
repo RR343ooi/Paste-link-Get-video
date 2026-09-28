@@ -7,6 +7,19 @@ const urlInput=$('#urlInput');
 const linkCount=$('#linkCount');
 const emptyState=$('#emptyState');
 let items=[];
+// Clean user-facing error: never show raw cookie/bot-check traces or stack traces.
+const YOUTUBE_BLOCKED='This app does not currently support YouTube.';
+function friendlyError(msg){
+  const m=String(msg||'');
+  const low=m.toLowerCase();
+  if(low.includes('youtube')||low.includes('youtu.be')||low.includes('cookie')
+    ||low.includes('bot check')||low.includes('sign in to confirm')
+    ||low.includes("confirm you")){
+    return YOUTUBE_BLOCKED;
+  }
+  return m||'Something went wrong.';
+}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function parseUrls(text){return text.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean)}
 function updateCount(){
   const n=parseUrls(urlInput.value).length;
@@ -44,18 +57,18 @@ async function fetchInfo(){
   try{
     const r=await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls})});
     const j=await r.json();
-    if(!r.ok) throw new Error(j.error||'Failed');
+    if(!r.ok) throw new Error(friendlyError(j.error)||'Failed');
     const qualities=new Set();
     j.results.forEach(info=>{
       if(info.status==='ok'){info.formats.forEach(f=>{if(f.label) qualities.add(f.height)});items.push(info);}
-      else{resultsEl.insertAdjacentHTML('beforeend',`<div class="card" style="padding:16px;border-color:#fecaca"><div class="title">${info.url}</div><div class="muted">Error: ${info.error}</div></div>`);}
+      else{resultsEl.insertAdjacentHTML('beforeend',`<div class="card" style="padding:16px;border-color:#fecaca"><div class="title">${esc(info.url)}</div><div class="muted">Error: ${esc(friendlyError(info.error))}</div></div>`);}
     });
     qualities.forEach(h=>{if(h) bulkQuality.insertAdjacentHTML('beforeend',`<option value="${h}">${h}p</option>`)});
     items.forEach(renderItem);
     if(items.length) bulkBar.classList.remove('hidden');
     statusEl.textContent=items.length?`Found ${items.length} video(s)`:'No videos found';
     if(!items.length&&!resultsEl.children.length){emptyState.style.display='';statusEl.textContent='No results';}
-  }catch(e){statusEl.textContent=e.message;emptyState.style.display='';}
+  }catch(e){statusEl.textContent=friendlyError(e.message);emptyState.style.display='';}
   finally{$('#fetchBtn').disabled=false;}
 }
 function renderItem(info){
@@ -71,9 +84,9 @@ function renderItem(info){
     try{
       const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       const j=await r.json();
-      if(!r.ok) throw new Error(j.error||'Download failed');
+      if(!r.ok) throw new Error(friendlyError(j.error)||'Download failed');
       poll(j.task_id,bar,prog,out);
-    }catch(e){out.textContent=e.message;}
+    }catch(e){out.textContent=friendlyError(e.message);}
   }
   el.querySelector('.dlVideo').onclick=()=>start('video');
   el.querySelector('.dlAudio').onclick=()=>start('audio');
@@ -84,12 +97,12 @@ async function poll(id,bar,prog,out){
     try{
       const r=await fetch(`/api/download/status/${id}`);
       const j=await r.json();
-      if(!r.ok) throw new Error(j.error);
+      if(!r.ok) throw new Error(friendlyError(j.error));
       bar.style.width=(j.progress||0)+'%';
-      if(j.status==='completed'){clearInterval(t);out.innerHTML=`Done — <a href="/api/downloads/${encodeURIComponent(j.filename)}">Download ${j.filename}</a>`;prog.classList.add('hidden');loadFiles();}
-      else if(j.status==='error'){clearInterval(t);out.textContent='Error: '+(j.error||'unknown');}
+      if(j.status==='completed'){clearInterval(t);out.innerHTML=`Done — <a href="/api/downloads/${encodeURIComponent(j.filename)}">Download ${esc(j.filename)}</a>`;prog.classList.add('hidden');loadFiles();}
+      else if(j.status==='error'){clearInterval(t);out.textContent='Error: '+friendlyError(j.error||'unknown');}
       else{out.textContent=j.status+' '+(j.progress||0)+'%';}
-    }catch(e){clearInterval(t);out.textContent=e.message;}
+    }catch(e){clearInterval(t);out.textContent=friendlyError(e.message);}
   },900);
 }
 async function downloadAll(mode){
@@ -99,7 +112,7 @@ async function downloadAll(mode){
   statusEl.textContent='Starting batch…';
   const r=await fetch('/api/download/all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls,quality,mode})});
   const j=await r.json();
-  if(!r.ok){statusEl.textContent=j.error;return;}
+  if(!r.ok){statusEl.textContent=friendlyError(j.error);return;}
   statusEl.textContent=`Queued ${j.tasks.length} download(s) — check each card`;
   const cards=[...resultsEl.querySelectorAll('.item')];
   j.tasks.forEach((t,i)=>{
