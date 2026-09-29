@@ -3,7 +3,7 @@ import re
 import uuid
 import threading
 import glob as globmod
-from flask import Flask, request, jsonify, send_from_directory, render_template, session
+from flask import Flask, request, jsonify, send_from_directory, render_template, session, Response
 from flask_cors import CORS
 import yt_dlp
 
@@ -754,7 +754,15 @@ def serve_download(filename):
 
 @app.route('/sitemap.xml')
 def serve_sitemap():
-    return send_from_directory(os.path.join(app.root_path, 'static'), 'sitemap.xml', mimetype='application/xml')
+    try:
+        sitemap_path = os.path.join(app.root_path, 'static', 'sitemap.xml')
+        with open(sitemap_path, 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+        return Response(xml_content, mimetype='application/xml')
+    except FileNotFoundError:
+        return Response('<?xml version="1.0" encoding="UTF-8"?><error>Sitemap not found</error>', status=404, mimetype='application/xml')
+    except Exception:
+        return Response('<?xml version="1.0" encoding="UTF-8"?><error>Could not load sitemap</error>', status=500, mimetype='application/xml')
 
 @app.route('/google42756cd1fa6be812.html')
 def serve_google_verification():
