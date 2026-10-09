@@ -57,6 +57,14 @@ function friendlyError(msg){
   return m||'Something went wrong.';
 }
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function triggerAutoDownload(fileUrl, fileName) {
+  const link = document.createElement('a');
+  link.href = fileUrl;
+  link.download = fileName || '';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
 function parseUrls(text){return text.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean)}
 function updateCount(){
   const n=parseUrls(urlInput.value).length;
@@ -129,14 +137,14 @@ function renderItem(info){
   el.querySelector('.dlAudio').onclick=()=>start('audio');
   resultsEl.appendChild(el);
 }
-async function poll(id,bar,prog,out){
+async function poll(id,bar,prog,out,autoDelay=0){
   const t=setInterval(async()=>{
     try{
       const r=await fetch(`/api/download/status/${id}`);
       const j=await r.json();
       if(!r.ok) throw new Error(friendlyError(j.error));
       bar.style.width=(j.progress||0)+'%';
-      if(j.status==='completed'){clearInterval(t);out.innerHTML=`Done — <a href="/api/downloads/${encodeURIComponent(j.filename)}">Download ${esc(j.filename)}</a>`;prog.classList.add('hidden');if(j.filename&&!isHiddenFile(j.filename)){saveMyFile({filename:j.filename});loadFiles();}}
+      if(j.status==='completed'){clearInterval(t);const downloadUrl=`/api/downloads/${encodeURIComponent(j.filename)}`;out.innerHTML=`Done — <a href="${downloadUrl}">Download ${esc(j.filename)}</a>`;prog.classList.add('hidden');if(j.filename&&!isHiddenFile(j.filename)){saveMyFile({filename:j.filename});loadFiles();setTimeout(()=>triggerAutoDownload(downloadUrl,j.filename),autoDelay);}}
       else if(j.status==='error'){clearInterval(t);out.textContent='Error: '+friendlyError(j.error||'unknown');}
       else{out.textContent=j.status+' '+(j.progress||0)+'%';}
     }catch(e){clearInterval(t);out.textContent=friendlyError(e.message);}
@@ -155,7 +163,7 @@ async function downloadAll(mode){
   j.tasks.forEach((t,i)=>{
     const card=cards[i];if(!card) return;
     const bar=card.querySelector('.bar'),prog=card.querySelector('.progress'),out=card.querySelector('.out');
-    prog.classList.remove('hidden');poll(t.task_id,bar,prog,out);
+    prog.classList.remove('hidden');poll(t.task_id,bar,prog,out,i*400);
   });
 }
 async function loadFiles(){
