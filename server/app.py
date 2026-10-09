@@ -316,6 +316,27 @@ def _safe_filename(name):
     return re.sub(r'[\\/*?:"<>|]', "_", name)
 
 
+# Max chars kept from a video title when building a download filename.
+# Keeps full paths (DOWNLOAD_DIR + 100-char title + " [id].ext") well
+# below OS NAME_MAX (255) / PATH_MAX limits. Long X/Twitter captions
+# otherwise blow up with [Errno 36] File name too long on Linux/Docker.
+MAX_TITLE_LEN = 100
+
+
+def sanitize_and_truncate(title: str, max_len: int = 80) -> str:
+    """Fallback sanitizer for any custom filename logic.
+
+    Strips filename-hostile characters and slices to max_len so the
+    resulting path component can never hit [Errno 36].
+    """
+    if not title or not isinstance(title, str):
+        return "Untitled"
+    clean_title = re.sub(r'[^\w\s-]', '', title).strip()
+    # Collapse runs of whitespace (common in long tweet captions)
+    clean_title = re.sub(r'\s+', ' ', clean_title)
+    return (clean_title[:max_len] or "Untitled")
+
+
 def _extract_info(url):
     if not url or not isinstance(url, str) or not url.strip().lower().startswith(("http://", "https://")):
         raise ValueError("Invalid URL. Paste a full http(s) video URL.")
@@ -412,7 +433,14 @@ def _download_task(task_id, url, quality, mode, owner_sid=None):
                 with _download_lock:
                     _active_downloads[task_id]["progress"] = 100
 
-        tmpl = os.path.join(DOWNLOAD_DIR, "%(title)s [%(id)s].%(ext)s")
+        # Truncate title to MAX_TITLE_LEN chars via yt-dlp's precision
+        # syntax "%(title).100s" so long captions (e.g. X/Twitter) can't
+        # trigger [Errno 36] File name too long. The unique [id] is kept
+        # outside the truncation so files stay identifiable.
+        # NOTE: do NOT add yt-dlp's "trim_file_name" here — it counts the
+        # absolute DOWNLOAD_DIR prefix against its budget and would chop
+        # off the " [id]" suffix instead of the title.
+        tmpl = os.path.join(DOWNLOAD_DIR, f"%(title).{MAX_TITLE_LEN}s [%(id)s].%(ext)s")
         base_common = _base_opts()
         base_common.update({
             "outtmpl": tmpl,
