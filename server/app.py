@@ -1,8 +1,12 @@
 import os
 import re
+import json
 import uuid
+import shutil
+import subprocess
 import threading
 import glob as globmod
+from urllib.parse import quote
 from flask import Flask, request, jsonify, send_from_directory, render_template, session, Response
 from flask_cors import CORS
 import yt_dlp
@@ -337,6 +341,108 @@ def sanitize_and_truncate(title: str, max_len: int = 80) -> str:
     return (clean_title[:max_len] or "Untitled")
 
 
+# --- Mobile-compatible H.264/AAC enforcement -----------------------------
+# yt-dlp's "best video" is often VP9/AV1. Native mobile players (Android
+# Chrome / iOS Safari) can't render those, so the file plays back as
+# "audio only". We guarantee the delivered MP4 uses H.264 (avc1) video +
+# AAC audio, which plays on every mobile browser.
+
+_H264_CODECS = {"h264", "avc1", "avc", "avc3"}
+_AAC_CODECS = {"aac", "mp4a"}
+
+
+def _find_ffmpeg():
+    """Return the ffmpeg executable path, or None if unavailable."""
+    for exe in ("ffmpeg", "ffmpeg.exe"):
+        found = shutil.which(exe)
+        if found:
+            return found
+    return None
+
+
+def _probe_codecs(path):
+    """Return (video_codec, audio_codec) lowercase names, or (None, None)."""
+    ffprobe = shutil.which("ffprobe") or shutil.which("ffprobe.exe")
+    if ffprobe:
+        try:
+            out = subprocess.run(
+                [ffprobe, "-v", "error", "-show_streams", "-print_format", "json", path],
+                capture_output=True, text=True, timeout=60,
+            ).stdout
+            data = json.loads(out or "{}")
+            v = a = None
+            for s in data.get("streams", []):
+                ctype = s.get("codec_type")
+                if ctype == "video" and v is None:
+                    v = (s.get("codec_name") or "").lower()
+                elif ctype == "audio" and a is None:
+                    a = (s.get("codec_name") or "").lower()
+            return v, a
+        except Exception:
+            pass
+    # Fallback: parse the `ffmpeg -i` banner from stderr.
+    exe = _find_ffmpeg()
+    if not exe:
+        return None, None
+    try:
+        proc = subprocess.run(
+            [exe, "-hide_banner", "-i", path],
+            capture_output=True, text=True, timeout=60,
+        )
+        txt = (proc.stderr or "") + (proc.stdout or "")
+        v = re.search(r"Video:\s*([A-Za-z0-9_]+)", txt)
+        a = re.search(r"Audio:\s*([A-Za-z0-9_]+)", txt)
+        return (v.group(1).lower() if v else None), (a.group(1).lower() if a else None)
+    except Exception:
+        return None, None
+
+
+def _ensure_mobile_compatible(path):
+    """Re-encode to H.264/AAC MP4 (+faststart) only if not already compatible.
+
+    Returns the path to a mobile-playable file. If probing or re-encoding is
+    not possible, the original file is returned unchanged (yt-dlp's format
+    selection is the primary fix; this is just a safety net).
+    """
+    if not path or not os.path.isfile(path):
+        return path
+    vcodec, acodec = _probe_codecs(path)
+    # Could not probe -> assume format selection already produced H.264/AAC
+    # rather than risking a needless (or broken) re-encode.
+    if vcodec is None:
+        return path
+    if vcodec in _H264_CODECS and (acodec is None or acodec in _AAC_CODECS):
+        return path
+    exe = _find_ffmpeg()
+    if not exe:
+        return path
+    base, _ext = os.path.splitext(path)
+    tmp = base + ".h264.tmp.mp4"
+    cmd = [
+        exe, "-y", "-hide_banner", "-loglevel", "error",
+        "-i", path,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart",
+        tmp,
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if res.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+            os.replace(tmp, path)
+    except Exception:
+        pass
+    finally:
+        # Clean up any leftover temp file (successful replace already removed it).
+        if os.path.isfile(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return path
+
+
 def _extract_info(url):
     if not url or not isinstance(url, str) or not url.strip().lower().startswith(("http://", "https://")):
         raise ValueError("Invalid URL. Paste a full http(s) video URL.")
@@ -458,7 +564,21 @@ def _download_task(task_id, url, quality, mode, owner_sid=None):
             ydl_opts = _inject_cookies(opts_dict)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info)
+                # Playlists return a dict with 'entries': resolve to the
+                # single downloaded entry so prepare_filename() reflects
+                # the actual file on disk (not the playlist placeholder).
+                single = info
+                if isinstance(single, dict) and single.get("entries"):
+                    try:
+                        entries = [e for e in single["entries"] if e]
+                    except TypeError:
+                        entries = []
+                    if entries:
+                        single = entries[-1]
+                try:
+                    filename = ydl.prepare_filename(single)
+                except Exception:
+                    filename = ""
                 # prepare_filename returns pre-merge/postprocessor name; fix ext
                 if opts_dict.get("merge_output_format") and filename:
                     base_p = os.path.splitext(filename)[0]
@@ -501,14 +621,27 @@ def _download_task(task_id, url, quality, mode, owner_sid=None):
                 raise last_err or RuntimeError("Audio download failed")
         else:
             q = str(quality or "best").strip().lower().replace("p", "")
+            # Mobile fix: prefer H.264 (avc1) video + AAC (m4a) audio. Native
+            # mobile players (Android Chrome / iOS Safari) render VP9/AV1 video
+            # as "audio only"; H.264/AAC MP4 plays everywhere. Each entry falls
+            # back to the next if the preferred combo isn't available.
             if q != "best" and q.isdigit():
+                h = f"[height<={q}]"
                 fmts = [
-                    f"bv*[height<={q}]+ba/b[height<={q}]/b",
-                    "bv*+ba/b",
-                    "b",
+                    f"bestvideo[ext=mp4][vcodec^=avc1]{h}+bestaudio[ext=m4a]",
+                    f"best[ext=mp4][vcodec^=avc1]{h}",
+                    f"best[ext=mp4]{h}",
+                    f"best[vcodec^=avc1]{h}",
+                    f"bv*{h}+ba/b{h}/bv*+ba/b",
                 ]
             else:
-                fmts = ["bv*+ba/b", "b"]
+                fmts = [
+                    "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]",
+                    "best[ext=mp4][vcodec^=avc1]",
+                    "best[ext=mp4]",
+                    "best[vcodec^=avc1]",
+                    "bv*+ba/b/bv*/b",
+                ]
             downloaded = False
             for client_args in _CLIENT_FALLBACKS:
                 if downloaded:
@@ -521,7 +654,20 @@ def _download_task(task_id, url, quality, mode, owner_sid=None):
                             cur["extractor_args"]["youtube"]["po_token"] = [_get_po_token()]
                         if _get_proxy():
                             cur["proxy"] = _get_proxy()
-                        cur.update({"format": fmt, "merge_output_format": "mp4"})
+                        cur.update({
+                            "format": fmt,
+                            # Always containerize the result as MP4.
+                            "merge_output_format": "mp4",
+                            # Normalize any non-MP4 fallback (e.g. webm) to MP4.
+                            "postprocessors": [
+                                {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"},
+                            ],
+                            # +faststart lets mobile browsers begin playback
+                            # before the file has fully streamed to disk.
+                            "postprocessor_args": {
+                                "ffmpeg": ["-movflags", "+faststart"],
+                            },
+                        })
                         _try_download(cur)
                         last_err = None
                         downloaded = True
@@ -548,38 +694,64 @@ def _download_task(task_id, url, quality, mode, owner_sid=None):
                 raise RuntimeError("Video download failed")
         try:
             info_id = info.get("id", "") if isinstance(info, dict) else ""
+            if not info_id and isinstance(info, dict) and info.get("entries"):
+                try:
+                    _entries = [e for e in (info.get("entries") or []) if e]
+                    if _entries and isinstance(_entries[-1], dict):
+                        info_id = _entries[-1].get("id", "") or ""
+                except Exception:
+                    pass
         except Exception:
             info_id = ""
         if mode == "audio":
-            base_p = os.path.splitext(filename)[0]
-            mp3 = base_p + ".mp3"
-            if os.path.exists(mp3):
+            base_p = os.path.splitext(filename)[0] if filename else ""
+            mp3 = base_p + ".mp3" if base_p else ""
+            if mp3 and os.path.exists(mp3):
                 filename = mp3
-            elif filename and not os.path.exists(filename) and info_id:
+            elif (not filename or not os.path.exists(filename)) and info_id:
                 cand = globmod.glob(os.path.join(DOWNLOAD_DIR, f"*{info_id}*.mp3"))
                 if cand:
                     filename = cand[0]
         else:
-            if filename and not os.path.exists(filename):
+            if not filename or not os.path.exists(filename):
                 if info_id:
                     cand = globmod.glob(os.path.join(DOWNLOAD_DIR, f"*{info_id}.*"))
                     if cand:
                         # prefer mp4, then newest
                         cand.sort(key=lambda p: (not p.lower().endswith(".mp4"), -os.path.getmtime(p)))
                         filename = cand[0]
-                if not os.path.exists(filename or ""):
+                if not filename or not os.path.exists(filename):
                     # last resort: newest file in downloads dir
                     try:
                         all_files = [os.path.join(DOWNLOAD_DIR, f) for f in os.listdir(DOWNLOAD_DIR)]
                         all_files = [p for p in all_files if os.path.isfile(p)]
                         if all_files:
-                            filename = max(all_files, key=os.path.getmtime)
+                            newest = max(all_files, key=os.path.getmtime)
+                            # Only adopt the newest file if prepare_filename gave us
+                            # nothing usable (avoids attaching an unrelated file
+                            # when the real download actually failed).
+                            if not filename or not os.path.exists(filename or ""):
+                                filename = newest
                     except Exception:
                         pass
-        fname = os.path.basename(filename) if filename else ""
+        # The exact filename on disk is the source of truth. Never trust a
+        # reconstructed title: basename whatever yt-dlp actually wrote.
+        actual_filename = os.path.basename(filename) if filename else ""
+        actual_path = os.path.join(DOWNLOAD_DIR, actual_filename) if actual_filename else ""
+        if not actual_filename or not os.path.isfile(actual_path):
+            raise RuntimeError("File not found on server after download completed.")
+        # Mobile fix: if the merged file still isn't H.264/AAC (e.g. a VP9/AV1
+        # fallback was chosen), re-encode it in place so Android/iOS browsers
+        # play both video AND audio. No-op when already compatible.
+        if mode != "audio":
+            actual_path = _ensure_mobile_compatible(actual_path)
+            actual_filename = os.path.basename(actual_path)
+        fname = actual_filename
+        download_url = f"/api/downloads/{quote(fname)}"
         with _download_lock:
             _active_downloads[task_id]["status"] = "completed"
             _active_downloads[task_id]["filename"] = fname
+            _active_downloads[task_id]["download_url"] = download_url
             _active_downloads[task_id]["progress"] = 100
             if owner_sid and fname and _is_visible_file(fname):
                 _session_files.setdefault(owner_sid, set()).add(fname)
@@ -738,7 +910,14 @@ def download_status(task_id):
         # Privacy: never reveal another session's task (same 404 shape).
         if info.get("owner") and info.get("owner") != sid:
             return jsonify({"error": "task not found"}), 404
-        return jsonify({"task_id": task_id, **info})
+        payload = {"task_id": task_id, **info}
+        # Backfill download_url for tasks completed before this field
+        # existed, and always derive it from the exact stored filename
+        # (the actual file on disk), never from the raw video title.
+        fname = info.get("filename")
+        if fname and not info.get("download_url"):
+            payload["download_url"] = f"/api/downloads/{quote(fname)}"
+        return jsonify(payload)
 
 
 @app.route("/api/downloads")
@@ -760,7 +939,7 @@ def list_downloads():
             continue
         if os.path.isfile(fp):
             try:
-                files.append({"filename": fname, "size": os.path.getsize(fp)})
+                files.append({"filename": fname, "size": os.path.getsize(fp), "download_url": f"/api/downloads/{quote(fname)}"})
             except OSError:
                 continue
     files.sort(key=lambda x: x["filename"])

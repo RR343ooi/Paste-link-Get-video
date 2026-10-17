@@ -29,7 +29,7 @@ function getMyFiles(){
 function saveMyFile(entry){
   if(!entry||!entry.filename||isHiddenFile(entry.filename)) return;
   const list=getMyFiles().filter(f=>f.filename!==entry.filename);
-  list.unshift({filename:entry.filename,size:entry.size||0,ts:Date.now()});
+  list.unshift({filename:entry.filename,size:entry.size||0,download_url:entry.download_url||(`/api/downloads/${encodeURIComponent(entry.filename)}`),ts:Date.now()});
   try{localStorage.setItem(MY_FILES_KEY,JSON.stringify(list.slice(0,100)));}catch{}
 }
 function renderMyFiles(extraByName){
@@ -39,10 +39,15 @@ function renderMyFiles(extraByName){
   // only filenames already in localStorage OR returned by our own session.
   const merged=mine.map(f=>{
     const extra=extraByName&&extraByName[f.filename];
-    return extra!=null?{...f,size:extra}:f;
+    if(extra!=null){
+      const size=(typeof extra==='object'?extra.size:f.size)!=null?(typeof extra==='object'?extra.size:f.size):f.size;
+      const download_url=(typeof extra==='object'&&extra.download_url)||f.download_url||(`/api/downloads/${encodeURIComponent(f.filename)}`);
+      return {...f,size,download_url};
+    }
+    return f;
   });
   if(!merged.length){el.textContent='No files yet.';return;}
-  el.innerHTML=merged.map(f=>`<div class="file"><span>${esc(f.filename)} <span class="muted">(${(f.size/1024/1024).toFixed(1)} MB)</span></span><a href="/api/downloads/${encodeURIComponent(f.filename)}">Download</a></div>`).join('');
+  el.innerHTML=merged.map(f=>{const href=f.download_url||`/api/downloads/${encodeURIComponent(f.filename)}`;return `<div class="file"><span>${esc(f.filename)} <span class="muted">(${(f.size/1024/1024).toFixed(1)} MB)</span></span><a href="${href}">Download</a></div>`;}).join('');
 }
 // Clean user-facing error: never show raw cookie/bot-check traces or stack traces.
 const YOUTUBE_BLOCKED='This app does not currently support YouTube.';
@@ -144,7 +149,7 @@ async function poll(id,bar,prog,out,autoDelay=0){
       const j=await r.json();
       if(!r.ok) throw new Error(friendlyError(j.error));
       bar.style.width=(j.progress||0)+'%';
-      if(j.status==='completed'){clearInterval(t);const downloadUrl=`/api/downloads/${encodeURIComponent(j.filename)}`;out.innerHTML=`Done — <a href="${downloadUrl}">Download ${esc(j.filename)}</a>`;prog.classList.add('hidden');if(j.filename&&!isHiddenFile(j.filename)){saveMyFile({filename:j.filename});loadFiles();setTimeout(()=>triggerAutoDownload(downloadUrl,j.filename),autoDelay);}}
+      if(j.status==='completed'){clearInterval(t);if(!j.filename||isHiddenFile(j.filename)){out.textContent='Error: File not found on server.';return;}const fileUrl=j.download_url||`/api/downloads/${encodeURIComponent(j.filename)}`;out.innerHTML=`Done — <a href="${fileUrl}">Download ${esc(j.filename)}</a>`;prog.classList.add('hidden');saveMyFile({filename:j.filename,download_url:fileUrl});loadFiles();setTimeout(()=>triggerAutoDownload(fileUrl,j.filename),autoDelay);}
       else if(j.status==='error'){clearInterval(t);out.textContent='Error: '+friendlyError(j.error||'unknown');}
       else{out.textContent=j.status+' '+(j.progress||0)+'%';}
     }catch(e){clearInterval(t);out.textContent=friendlyError(e.message);}
@@ -174,11 +179,11 @@ async function loadFiles(){
     const r=await fetch('/api/downloads');const j=await r.json();
     if(!r.ok) return;
     const byName={};
-    (j.files||[]).forEach(f=>{if(f&&f.filename&&!isHiddenFile(f.filename)) byName[f.filename]=f.size||0;});
+    (j.files||[]).forEach(f=>{if(f&&f.filename&&!isHiddenFile(f.filename)) byName[f.filename]={size:f.size||0,download_url:f.download_url||(`/api/downloads/${encodeURIComponent(f.filename)}`)};});
     // Adopt server-known files into localStorage (e.g. after storage was cleared
     // but the session cookie is still valid) — server list is already per-session.
     Object.keys(byName).forEach(name=>{
-      if(!getMyFiles().some(f=>f.filename===name)) saveMyFile({filename:name,size:byName[name]});
+      if(!getMyFiles().some(f=>f.filename===name)) saveMyFile({filename:name,size:byName[name].size,download_url:byName[name].download_url});
     });
     renderMyFiles(byName);
   }catch{}
